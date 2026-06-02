@@ -11,16 +11,25 @@ class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable;
 
-    protected $fillable = ['name', 'email', 'password', 'role', 'google_id', 'microsoft_id', 'is_active'];
-    protected $hidden = ['password', 'remember_token'];
-    protected $casts = ['password' => 'hashed', 'is_active' => 'boolean'];
+    protected $fillable = [
+        'name', 'email', 'password', 'role', 
+        'google_id', 'microsoft_id', 'is_active', 'fcm_token'
+    ];
+
+    protected $hidden = [
+        'password', 'remember_token',
+    ];
+
+    protected $casts = [
+        'password' => 'hashed',
+        'is_active' => 'boolean',
+    ];
 
     public function technician(): HasOne
     {
         return $this->hasOne(Technician::class);
     }
 
-    // Escopo para filtrar usuários que aguardam moderação
     public function scopePending(Builder $query): Builder
     {
         return $query->where('is_active', false);

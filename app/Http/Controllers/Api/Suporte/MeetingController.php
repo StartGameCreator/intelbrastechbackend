@@ -10,9 +10,6 @@ class MeetingController extends Controller
 {
     public function __construct(protected VideoConferenceService $conferenceService) {}
 
-    /**
-     * Agenda a videoconferência vinculada ao chamado
-     */
     public function schedule(Request $request, int $ticketId): JsonResponse
     {
         $request->validate([
@@ -22,7 +19,6 @@ class MeetingController extends Controller
 
         $ticket = Ticket::findOrFail($ticketId);
 
-        // Validação: Garante que apenas o técnico dono do chamado ou admin gerem a sala
         if ($request->user()->id !== $ticket->technician_id && $request->user()->role !== 'master') {
             return response()->json(['error' => 'Não autorizado.'], 403);
         }

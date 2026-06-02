@@ -4,6 +4,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use Laravel\Socialite\Facades\Socialite;
 use Illuminate\Http\RedirectResponse;
+use Exception;
 
 class OAuthController extends Controller
 {
@@ -37,7 +38,7 @@ class OAuthController extends Controller
             $status = $user->is_active ? 'active' : 'pending';
 
             return redirect()->away(config('app.frontend_url') . "/oauth-callback?token={$token}&status={$status}");
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             report($e);
             return redirect()->away(config('app.frontend_url') . "/login?error=auth_failed");
         }

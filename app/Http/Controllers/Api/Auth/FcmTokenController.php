@@ -6,9 +6,6 @@ use Illuminate\Http\JsonResponse;
 
 class FcmTokenController extends Controller
 {
-    /**
-     * Registra ou atualiza o token push do dispositivo atual do usuário
-     */
     public function updateToken(Request $request): JsonResponse
     {
         $request->validate([

@@ -4,9 +4,6 @@ use Illuminate\Support\Facades\Http;
 
 class GoogleMapsService
 {
-    /**
-     * Consulta a API do Google para buscar lat/lng com tratamento de falhas.
-     */
     public function getCoordinatesFromAddress(string $address): ?array
     {
         try {

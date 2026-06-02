@@ -7,14 +7,13 @@ use Illuminate\Support\Collection;
 
 class DistributionService
 {
-    /**
-     * Algoritmo purificado para rodar direto nos índices espaciais do MySQL 8.
-     */
     public function findNearbyTechniciansForTicket(Ticket $ticket, int $categoryId, float $radiusInKm = 20.0): Collection
     {
         $ticketLocation = DB::table('tickets')->where('id', $ticket->id)->value('location');
 
-        if (!$ticketLocation) return collect();
+        if (!$ticketLocation) {
+            return collect();
+        }
 
         return Technician::with(['user'])
             ->whereHas('user', function($q) { $q->where('is_active', true); })
