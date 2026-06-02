@@ -507,3 +507,442 @@ Os serviços de Geolocalização (DistributionService) e Videoconferência (Vide
 Sim! O trabalho feito até aqui foi o alicerce (as vigas da casa). Agora, com a sua auditoria, nós descobrimos que a casa precisa de mais cômodos e andares. Nós não vamos derrubar as vigas; vamos apenas puxar novas conexões a partir delas.
 
 O Git é perfeito para isso. Como você já deu o git commit da base estrutural, qualquer alteração que fizermos a partir de agora ficará registrada como um histórico de evolução, e você poderá reverter ou comparar os códigos a qualquer momento se algo quebrar.
+
+Primeiramente eu preciso saber de uma coisa , os codigos ja produzidos serão alterados ?
+
+A resposta curta e direta é: Sim, de forma pontual, mas o que já foi feito não será jogado fora. O que vai acontecer é uma refatoração e expansão para que o código atual se adapte à nova arquitetura robusta de 40 tabelas que você desenhou.
+
+Para ficar totalmente claro e você não ter receio de perder o progresso, veja exatamente como cada parte já produzida será afetada:
+
+1. O Banco de Dados (Intelgemini.sql)
+O seu script SQL atual está excelente e serve como a fundação do sistema. Ele passará por adições, não por exclusões:
+
+A tabela users ganhará o campo profileable_id e profileable_type para suportar o polimorfismo de perfis (Técnico, Distribuidor, Integrador, Cliente).
+
+Novas tabelas serão criadas ao redor dele (como technician_portfolio, services, conversations, solar_projects, etc.) para cobrir as lacunas que você apontou.
+
+2. Os Modelos (Models)
+Eles receberão novos relacionamentos. Por exemplo:
+
+O modelo User.php hoje aponta apenas para technician. Ele será alterado para conter o relacionamento polimórfico profile(), permitindo que o mesmo usuário logado seja tratado como uma Empresa ou um Cliente Final dependendo do seu tipo de cadastro.
+
+O modelo Post.php e User.php ganharão os métodos para suportar seguidores (followers()) e compartilhamentos (shares()) que estão faltando.
+
+3. Os Controladores e Rotas (routes/api.php)
+As rotas que criamos continuam existindo, mas o arquivo api.php vai crescer consideravelmente.
+
+Onde hoje temos apenas o grupo Route::prefix('admin'), injetaremos os middlewares do pacote Spatie, alterando a proteção de segurança de:
+
+PHP
+
+
+// Como está hoje (Validação manual dentro do controller)
+Route::get('users/pending', [UserModerationController::class, 'pendingUsers']);
+
+// Como ficará (Bloqueio direto na rota via Spatie)
+Route::get('users/pending', [UserModerationController::class, 'pendingUsers'])->middleware('role:master|regional');
+
+4. Os Serviços (Services)
+Os serviços de Geolocalização (DistributionService) e Videoconferência (VideoConferenceService) estão prontos no core. A única alteração futura neles será a expansão: por exemplo, adaptar o serviço de vídeo para aceitar o Jitsi Meet (sua recomendação) além do Meet e Teams que já estão codificados.
+
+🛡️ Conclusão: É seguro prosseguir?
+Sim! O trabalho feito até aqui foi o alicerce (as vigas da casa). Agora, com a sua auditoria, nós descobrimos que a casa precisa de mais cômodos e andares. Nós não vamos derrubar as vigas; vamos apenas puxar novas conexões a partir delas.
+
+O Git é perfeito para isso. Como você já deu o git commit da base estrutural, qualquer alteração que fizermos a partir de agora ficará registrada como um histórico de evolução, e você poderá reverter ou comparar os códigos a qualquer momento se algo quebrar.
+
+
+Excelente escolha. O Módulo Alfa é a espinha dorsal de toda a nova arquitetura do IntelbrasTech. Sem ele, não conseguiríamos separar com segurança o que um Técnico pode ver do que um Distribuidor, Integrador ou Cliente comum acessam.
+
+Para fazer essa expansão de forma cirúrgica, nós vamos focar em duas frentes integradas:
+
+Instalação e Configuração do RBAC profissional (spatie/laravel-permission).
+
+Modelagem Polimórfica de Perfis, removendo o inchaço da tabela users.
+
+Abaixo está o guia passo a passo com os códigos exatos das alterações e novas criações.
+
+PASSO 1: Preparando a Infraestrutura de Permissões (Spatie)
+Como o pacote spatie/laravel-permission cria suas próprias tabelas de controle (roles, permissions, model_has_roles, etc.), precisamos gerar e rodar a estrutura dele no banco de dados.
+
+1. Atualizando o composer.json e baixando o pacote
+No terminal da raiz do seu projeto (C:\intelbrastechbackend), execute o comando para baixar o pacote oficial:
+
+composer require spatie/laravel-permission
+
+2. Publicando e Rodando as Novas Tabelas
+O pacote vem com uma migration padrão. Vamos publicá-la e rodar o comando do banco de dados para criar as tabelas de controle automático de acessos
+
+php artisan vendor:publish --provider="Spatie\Permission\PermissionServiceProvider"
+php artisan migrate
+
+(Nota: Como você já rodou o script SQL bruto anteriormente, o comando migrate criará apenas as 5 tabelas específicas de permissões do Spatie ao redor das suas tabelas existentes).
+
+PASSO 2: Nova Migration de Perfis Polimórficos
+Para que a tabela users consiga se conectar dinamicamente a qualquer tipo de perfil (Técnico, Cliente, Integrador, Distribuidor) sem precisar de colunas duplicadas ou nulas, criaremos uma migration de alteração.
+
+No terminal, crie a nova migration:
+
+php artisan make:migration alter_users_table_for_polymorphism
+
+Abra o arquivo gerado em database/migrations/ e deixe o código exatamente assim:
+
+PHP
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration {
+    public function up(): void
+    {
+        Schema::table('users', function (Blueprint $table) {
+            // Adiciona os campos para o relacionamento polimórfico do Eloquent
+            $table->nullableMorphs('profileable'); // Isso cria automagicamente: profileable_id e profileable_type
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('users', function (Blueprint $table) {
+            $table->dropMorphs('profileable');
+        });
+    }
+};
+Execute o comando para aplicar no banco de dados:
+
+Bash
+php artisan migrate
+PASSO 3: Refatorando e Expandindo os Modelos (Models)
+Agora vamos alterar e criar os modelos necessários para ativar o ecossistema polimórfico e de permissões.
+
+1. Refatoração do app/Models/User.php
+Precisamos incluir a trait HasRoles do Spatie e substituir o relacionamento antigo fixo (technician) pelo relacionamento polimórfico dinâmico profile().
+
+PHP
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
+use Illuminate\Database\Eloquent\Builder;
+use Spatie\Permission\Traits\HasRoles; // <-- A Nova Trait de Controle
+
+class User extends Authenticatable
+{
+    use HasApiTokens, HasFactory, Notifiable, HasRoles; // <-- Incluída aqui
+
+    protected $fillable = [
+        'name', 'email', 'password', 'role', 
+        'google_id', 'microsoft_id', 'is_active', 'fcm_token',
+        'profileable_id', 'profileable_type' // <-- Novos campos permitidos
+    ];
+
+    protected $hidden = [
+        'password', 'remember_token',
+    ];
+
+    protected $casts = [
+        'password' => 'hashed',
+        'is_active' => 'boolean',
+    ];
+
+    /**
+     * Relacionamento Polimórfico Central
+     * Pode retornar uma instância de Technician, Client, Integrator, Company, etc.
+     */
+    public function profile(): MorphTo
+    {
+        return $this->morphTo();
+    }
+
+    public function scopePending(Builder $query): Builder
+    {
+        return $query->where('is_active', false);
+    }
+}
+2. Refatoração do app/Models/Technician.php
+O técnico agora avisa o Laravel que ele é um "alvo" polimórfico do usuário. Além disso, adicionamos os novos campos de currículo e portfólio apontados na sua auditoria.
+
+PHP
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+
+class Technician extends Model
+{
+    protected $fillable = [
+        'cpf', 'rg', 'cnpj', 'company_name', 'crea', 'crt', 'cft', 
+        'phone', 'whatsapp', 'avatar_url', 'bio', 'cep', 'state', 'city', 
+        'neighborhood', 'location', 'rating_cache', 'jobs_completed',
+        'banner_url', 'resume_url', 'experience_years', 'is_remote' // <-- Novos campos da Auditoria
+    ];
+
+    /**
+     * Conexão inversa polimórfica com a tabela de usuários
+     */
+    public function user(): MorphOne
+    {
+        return $this->morphOne(User::class, 'profileable');
+    }
+
+    public function categories(): BelongsToMany
+    {
+        return $this->belongsToMany(Category::class);
+    }
+}
+3. Criação do Novo Modelo de Empresas/Distribuidores (app/Models/Company.php)
+Conforme detectado na sua auditoria, faltavam os perfis corporativos. Vamos criar o modelo que herda a estrutura polimórfica de User.
+
+PHP
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
+
+class Company extends Model
+{
+    protected $table = 'companies';
+
+    protected $fillable = [
+        'cnpj', 'corporate_name', 'trade_name', 'ie', 
+        'phone', 'whatsapp', 'website', 'logo_url', 'bio', 
+        'cep', 'state', 'city', 'neighborhood', 'address_number'
+    ];
+
+    public function user(): MorphOne
+    {
+        return $this->morphOne(User::class, 'profileable');
+    }
+}
+(Nota: Lembre-se de rodar um php artisan make:migration create_companies_table simples no seu terminal contendo esses campos de texto do fillable para gerar a tabela física no seu MySQL).
+
+PASSO 4: Criando o Carga Inicial de Roles (Seeder Automático)
+Para que o sistema já nasça com os níveis hierárquicos protegidos criados, vamos criar um arquivo de semente (Seeder) para alimentar o Spatie com as regras do IntelbrasTech.
+
+Rode no terminal:
+
+Bash
+php artisan make:seeder RolesAndPermissionsSeeder
+Abra o arquivo gerado em database/seeders/RolesAndPermissionsSeeder.php e adicione a lógica de criação de papéis profissionais:
+
+PHP
+namespace Database\Seeders;
+
+use Illuminate\Database\Seeder;
+use Spatie\Permission\Models\Role;
+use Spatie\Permission\Models\Permission;
+
+class RolesAndPermissionsSeeder extends Seeder
+{
+    public function run(): void
+    {
+        // Limpa o cache de permissões do Spatie antes de rodar
+        app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();
+
+        // 1. CRIAÇÃO DE PERMISSÕES CRÍTICAS DO ECOSSISTEMA
+        Permission::create(['name' => 'approve users']);
+        Permission::create(['name' => 'publish services']);
+        Permission::create(['name' => 'submit proposals']);
+        Permission::create(['name' => 'moderate social network']);
+        Permission::create(['name' => 'access regional intelligence']);
+
+        // 2. CRIAÇÃO DOS PAPÉIS (ROLES) E ATRIBUIÇÃO DE PERMISSÕES
+        
+        // Master / Admin Geral - Tem poder total
+        $masterRole = Role::create(['name' => 'master']);
+        $masterRole->givePermissionTo(Permission::all());
+
+        // Regional - Moderação local e inteligência de mapa
+        $regionalRole = Role::create(['name' => 'regional']);
+        $regionalRole->givePermissionTo(['approve users', 'access regional intelligence', 'moderate social network']);
+
+        // Técnico - Envia propostas de instalação/manutenção
+        $technicianRole = Role::create(['name' => 'technician']);
+        $technicianRole->givePermissionTo(['submit proposals']);
+
+        // Empresa / Integrador / Distribuidor
+        $companyRole = Role::create(['name' => 'company']);
+        $companyRole->givePermissionTo(['publish services']);
+
+        // Cliente Comum B2C
+        $clientRole = Role::create(['name' => 'client']);
+        $clientRole->givePermissionTo(['publish services']);
+    }
+}
+Agora execute o Seeder para injetar as permissões no banco de dados:
+
+Bash
+php artisan db:seed --class=RolesAndPermissionsSeeder
+🔒 Como fica a proteção de Rotas agora?
+Com o Módulo Alfa instalado e configurado dessa forma, o arquivo de rotas que revisamos anteriormente (routes/api.php) agora passa a contar com uma proteção nativa e ultra elegante em nível de Middleware do Spatie. Veja um exemplo prático de aplicação:
+
+PHP
+// Dentro do seu routes/api.php, nas rotas protegidas por Sanctum:
+Route::middleware('auth:sanctum')->group(function () {
+
+    // Apenas Administradores Master ou Regionais entram na rota de aprovação
+    Route::prefix('admin')->middleware(['role:master|regional'])->group(function () {
+        Route::get('users/pending', [UserModerationController::class, 'pendingUsers']);
+        Route::post('users/{id}/approve', [UserModerationController::class, 'approve']);
+    });
+
+    // Apenas Técnicos Homologados podem acessar o feed ou enviar propostas
+    Route::middleware(['role:technician'])->group(function () {
+        Route::post('posts', [FeedController::class, 'store']);
+    });
+});
+A base está expandida, flexível para múltiplos perfis corporativos e altamente protegida.
+
+Podemos dar o próximo passo na evolução do ecossistema e codificar o Módulo Beta (Marketplace de Serviços com as tabelas de propostas, ordens e avaliações por estrelas) ou prefere adicionar mais algum detalhe nos perfis expandidos?
+
+Calma, não precisa se preocupar! Analisando o seu terminal, o seu processo **não falhou**. Na verdade, o Composer foi super inteligente e resolveu o principal problema sozinho, mas dois pequenos erros de digitação e configuração do XAMPP assustaram você.
+
+Vamos decifrar exatamente o que aconteceu e como resolver os avisos:
+
+---
+
+### 1. O que deu CERTO (E você pode comemorar)
+
+O Composer percebeu que o seu PHP atual é a versão 8.2 e que a versão mais recente do Spatie (v8.0) exige o PHP 8.3.
+
+Automaticamente, ele tomou a decisão correta: baixou e instalou a **versão `6.25.0` do Spatie**, que é perfeitamente estável, totalmente compatível com o seu PHP 8.2 e possui exatamente os mesmos recursos que precisamos para o IntelbrasTech.
+
+> **Status:** O pacote de permissões está instalado com sucesso no seu projeto!
+
+---
+
+### 2. O Erro no comando `php artisan vendor:publish`
+
+O erro que travou a tela aconteceu porque, na hora de digitar ou colar, um `"php"` grudou no final do comando. O terminal entendeu que você estava tentando carregar uma extensão do XAMPP chamada "php", que obviamente não existe.
+
+O comando original terminou assim: `...ServiceProvider"php`
+
+#### 🛠️ Como resolver agora:
+
+Basta rodar o comando novamente, limpando o final dele. Copie e cole exatamente isto no seu terminal:
+
+```bash
+php artisan vendor:publish --provider="Spatie\Permission\PermissionServiceProvider"
+
+```
+
+Assim que você rodar esse comando corrigido, o Laravel vai criar o arquivo de migração das permissões. Em seguida, você já poderá rodar o comando para aplicar tudo no banco:
+
+```bash
+php artisan migrate
+
+```
+
+---
+
+### 3. Por que o XAMPP está reclamando de "tokenizer" e "openssl"?
+
+Esses avisos de *«Não foi possível encontrar o módulo especificado»* acontecem porque o arquivo de configuração do seu PHP (`php.ini` do XAMPP) tem algumas linhas duplicadas ou tentando carregar extensões que o PHP 8.2 já traz ativadas por padrão (como o tokenizer).
+
+**Isso impede o IntelbrasTech de funcionar? Não.** São apenas avisos (*Warnings*), não erros fatais (*Fatal Errors*). O Laravel continuará rodando normalmente.
+
+Se no futuro você quiser limpar esses avisos chatos da sua tela:
+
+1. Abra o painel do XAMPP.
+2. Clique no botão **Config** na linha do Apache e selecione **PHP (php.ini)**.
+3. Dê um `Ctrl + F` e procure por `extension=tokenizer` ou `extension=openssl`.
+4. Adicione um ponto e vírgula `;` no começo dessas linhas para comentá-las (ex: `;extension=tokenizer`) e salve o arquivo.
+
+Para agora, **foque apenas em rodar o comando corrigido do Passo 2**. Pode mandar bala!
+
+Esse aviso clássico significa apenas uma coisa: **o terminal perdeu a noção de onde você está.** O erro `Could not open input file: artisan` acontece porque o arquivo `artisan` (o motor de comandos do Laravel) fica guardado estritamente na raiz do projeto (`C:\intelbrastechbackend`). Se você estiver fora dessa pasta, o terminal não encontra o arquivo e o comando falha.
+
+Provavelmente, ao fechar e abrir o terminal ou rodar comandos anteriores, você acabou voltando para a pasta padrão do Windows (como `C:\Users\seu-usuario`).
+
+---
+
+### 🛠️ Como resolver em 2 segundos:
+
+Basta dizer ao seu terminal para entrar na pasta do projeto novamente antes de rodar o comando. Execute esta sequência exatamente assim:
+
+**1. Entre na pasta do projeto:**
+
+```bash
+cd C:\intelbrastechbackend
+
+```
+
+**2. Agora sim, rode o comando do Spatie (limpo, sem o "php" grudado no final):**
+
+```bash
+php artisan vendor:publish --provider="Spatie\Permission\PermissionServiceProvider"
+
+```
+
+---
+
+### 🔍 O que vai acontecer em seguida?
+
+O terminal vai responder uma mensagem em verde parecida com isto:
+
+> *Copied File [database/migrations/xxxx_xx_xx_xxxxxx_create_permission_tables.php] To [database/migrations/]*
+
+Assim que essa mensagem aparecer, significa que o Spatie criou o arquivo com as tabelas dele dentro do seu projeto. O seu último passo desse bloco será rodar as migrações para injetar tudo no banco de dados:
+
+```bash
+php artisan migrate
+
+```
+
+O aviso do `openssl` vai continuar aparecendo no topo, mas pode ignorá-lo completamente, o processo vai rodar até o final! Me avise se deu tudo certo.
+
+
+O culpado aqui continua sendo o mesmo: o terminal ainda está perdido fora da pasta do projeto, e por isso o erro **`Could not open input file: artisan`** se repetiu.
+
+Como você provavelmente abriu uma nova janela ou o terminal resetou, ele voltou para a pasta padrão do Windows. Para o comando do Laravel funcionar, você precisa obrigatoriamente estar "olhando" para a pasta onde o projeto foi instalado.
+
+Sobre os avisos do PHP (`bcmath` e `openssl`), relaxa! O seu XAMPP está apenas confuso tentando carregar coisas repetidas, mas isso **não impede** o Laravel de rodar.
+
+Vamos resolver isso em definitivo agora. Siga este passo a passo cirúrgico:
+
+### Passo 1: Garantir que você está na pasta certa
+
+Digite exatamente este comando e aperte Enter:
+
+```bash
+cd C:\intelbrastechbackend
+
+```
+
+*(Repare que o início da linha no seu terminal tem que mudar para `PS C:\intelbrastechbackend>`).*
+
+### Passo 2: Rodar o comando do Spatie
+
+Agora que o terminal sabe onde o arquivo `artisan` está, copie e cole este comando:
+
+```bash
+php artisan vendor:publish --provider="Spatie\Permission\PermissionServiceProvider"
+
+```
+
+### Passo 3: Criar as tabelas no banco de dados
+
+Logo em seguida, rode o comando para aplicar as novas tabelas de permissões e perfis no seu banco de dados:
+
+```bash
+php artisan migrate
+
+```
+
+---
+
+### 🛠️ Quer sumir com esses avisos chatos do XAMPP?
+
+Se você cansar de ver esses avisos de `bcmath` e `openssl` poluindo seu terminal toda vez que digita um comando, a correção é simples:
+
+1. Abra o painel do **XAMPP**.
+2. Na linha do **Apache**, clique no botão **Config** e selecione **PHP (php.ini)**.
+3. No arquivo de texto que abrir, aperte `Ctrl + F` (ou `Ctrl + T` dependendo do editor) e procure por: `extension=bcmath`
+4. Você vai notar que essa linha provavelmente está sem um ponto e vírgula na frente, ou duplicada. Deixe ela comentada adicionando um ponto e vírgula no começo, assim: `;extension=bcmath`
+5. Faça o mesmo para o `tokenizer` ou `openssl` se estiverem acusando erro.
+6. Salve o arquivo e feche-o.
+
+Focando no **Passo 1 e 2**, você já destrava o projeto para continuarmos! Me avise assim que a mensagem verde de sucesso do `publish` aparecer.
